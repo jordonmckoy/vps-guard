@@ -36,16 +36,21 @@ The selection is saved to `.vps-guard.json` (gitignored). CLI overrides: `python
 ## Checks
 
 - OS/kernel and privileges
-- Listening TCP and UDP ports, highlighting wildcard bindings and common database/metrics ports
-- Effective OpenSSH configuration (password, keyboard-interactive, root login, etc.)
-- UFW status (host firewall only; cannot validate provider firewall)
-- APT upgrade candidates (simulation; lists may be stale)
-- Basic unattended-upgrades periodic configuration and service/timer state
-- Docker container port publication, if accessible
-- Tailscale backend availability
-- Manual critical check: provider-side firewall, backups, disaster recovery
+- Listening TCP and UDP ports with owning process, classified as wildcard, public, private, Tailscale or loopback; database/metrics ports on exposed addresses fail
+- Effective OpenSSH configuration (password, keyboard-interactive, root login, public keys, `MaxAuthTries`, `AllowUsers`/`AllowGroups`)
+- SSH exposure: whether sshd is reachable outside Tailscale, cross-checked against UFW rules on `tailscale0`
+- `authorized_keys` inventory for every account (key type and comment only)
+- fail2ban status and jails
+- Host firewall: UFW (including IPv6 filtering), falling back to nftables/iptables rulesets
+- APT upgrade candidates (simulation; lists may be stale) and pending reboots
+- unattended-upgrades package, periodic configuration and service/timer state
+- Accounts: extra UID 0 accounts, empty passwords, passwordless sudo, `docker` group members
+- Docker: wildcard/public published ports, privileged containers, host networking, mounted Docker socket
+- Tailscale: backend state, node key expiry, tags, start at boot, health warnings, client updates, advertised routes/exit node, Tailscale SSH, Funnel exposure
+- Clock synchronisation, AppArmor, kernel IP forwarding
+- Manual critical checks: provider-side firewall, backups, disaster recovery; Tailscale ACLs and tailnet settings
 
-Check statuses: `pass`, `fail`, `review`, `unknown`. `unknown` is **not** a pass. A `fail` means a configuration warrants attention, not proof of exploitable vulnerability. `ss` cannot establish actual internet reachability.
+Check statuses: `pass`, `fail`, `review`, `unknown`. `unknown` is **not** a pass. A `fail` means a configuration warrants attention, not proof of exploitable vulnerability. `ss` cannot establish actual internet reachability. `scan` exits with status 1 when any check fails, so it can gate cron jobs or CI.
 
 ## Remediation
 
@@ -79,18 +84,3 @@ The confirmed fix runs `apt-get update`, installs `unattended-upgrades`, and cre
 - UFW does not necessarily protect Docker-published ports. Prefer both provider firewall and container network isolation.
 - This project is not an official product of any VPS provider.
 - Audit evidence may contain deployment metadata; keep the reports private.
-
-## Publishing as a repo
-
-Create an empty **private** GitHub repository called `vps-guard`, then run locally in the extracted directory:
-
-```bash
-git init
-git add .
-git commit -m 'Initial safe VPS audit toolkit'
-git branch -M main
-git remote add origin git@github.com:YOUR-ACCOUNT/vps-guard.git
-git push -u origin main
-```
-
-Clone to the VPS using your preferred authentication, or download an archive of the repo. Never embed GitHub tokens or private keys in source files.
