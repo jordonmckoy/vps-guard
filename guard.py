@@ -18,6 +18,7 @@ VERSION = '0.3.0'
 PROVIDERS = ('hetzner', 'digitalocean', 'other')
 CONFIG_NAME = '.vps-guard.json'
 RISKY_PORTS = {'2375', '2376', '3000', '3306', '5432', '6379', '9090', '9200', '27017'}
+EXPECTED_PUBLIC_PORTS = {'80', '443'}
 TAILSCALE_NETWORKS = (ipaddress.ip_network('100.64.0.0/10'), ipaddress.ip_network('fd7a:115c:a1e0::/48'))
 EXPOSED_SCOPES = ('wildcard', 'public')
 DOCKER_SOCKETS = ('/var/run/docker.sock', '/run/docker.sock')
@@ -340,26 +341,46 @@ def check_docker(host):
         return
     ids = ps['out'].split()
     containers = json.loads(host.run('docker_inspect', ['docker', 'inspect', *ids])['out'] or '[]') if ids else []
-    published, isolation = {}, {}
+    published, risky_publish, unexpected_publish, isolation = {}, {}, {}, {}
     for container in containers:
         name = container['Name'].lstrip('/')
         config = container['HostConfig']
-        ports = [f"{binding['HostIp'] or '*'}:{binding['HostPort']}->{port}"
-                 for port, bindings in (container['NetworkSettings'].get('Ports') or {}).items()
-                 for binding in bindings or [] if address_scope(binding['HostIp']) in EXPOSED_SCOPES]
+        exposed = []
+        for port, bindings in (container['NetworkSettings'].get('Ports') or {}).items():
+            for binding in bindings or []:
+                if address_scope(binding['HostIp']) not in EXPOSED_SCOPES:
+                    continue
+                host_ip = binding['HostIp']
+                if not host_ip or host_ip in ('0.0.0.0', '::'):
+                    host_ip = '*'
+                exposed.append((binding['HostPort'], f"{host_ip}:{binding['HostPort']}->{port}"))
         issues = [label for label, present in (
             ('privileged', config.get('Privileged')),
             ('host network', config.get('NetworkMode') == 'host'),
             ('docker socket mounted', any(mount.get('Source') in DOCKER_SOCKETS for mount in container.get('Mounts') or [])),
         ) if present]
-        if ports:
-            published[name] = ports
+        if exposed:
+            published[name] = [label for _, label in exposed]
+            risky = [label for host_port, label in exposed if host_port in RISKY_PORTS]
+            unexpected = [label for host_port, label in exposed if host_port not in EXPECTED_PUBLIC_PORTS]
+            if risky:
+                risky_publish[name] = risky
+            if unexpected:
+                unexpected_publish[name] = unexpected
         if issues:
             isolation[name] = issues
-    yield finding('docker_publish', 'high', 'fail' if published else 'pass',
-        'Docker containers with wildcard or public published ports', published,
-        'Publish only public reverse proxy ports. Bind internal services to 127.0.0.1 or the Tailscale IP '
-        '(-p 100.x.y.z:5432:5432), or keep them on private Docker networks. UFW does not filter Docker-published ports.')
+    if risky_publish:
+        status, severity = 'fail', 'high'
+    elif unexpected_publish:
+        status, severity = 'review', 'medium'
+    else:
+        status, severity = 'pass', 'info'
+    yield finding('docker_publish', severity, status,
+        'Docker containers with wildcard or public published ports',
+        {'published': published, 'risky': risky_publish, 'unexpected': unexpected_publish},
+        'Ports 80/443 for a reverse proxy are expected. Fail only on database, Docker API and similar risky '
+        'ports. Bind internal services to 127.0.0.1 or the Tailscale IP (-p 100.x.y.z:5432:5432), or keep them '
+        'on private Docker networks. UFW does not filter Docker-published ports.')
     yield finding('docker_isolation', 'high', 'fail' if isolation else 'pass',
         'Docker containers with host-level access', isolation,
         'Privileged mode, host networking and a mounted Docker socket each give a container root-equivalent access to the host. '

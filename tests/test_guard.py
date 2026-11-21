@@ -97,15 +97,29 @@ class Tests(unittest.TestCase):
         self.assertEqual([f['id'] for f in guard.check_tailscale(host, None, {})], ['tailscale'])
 
     def test_docker(self):
-        container = {'Name': '/db', 'HostConfig': {'Privileged': True, 'NetworkMode': 'bridge'},
-                     'NetworkSettings': {'Ports': {'5432/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '5432'}],
-                                                   '8080/tcp': [{'HostIp': '100.64.0.1', 'HostPort': '8080'}],
-                                                   '9000/tcp': None}},
-                     'Mounts': [{'Source': '/var/run/docker.sock'}]}
-        host = StubHost({'docker': 'abc123', 'docker_inspect': json.dumps([container])})
+        db = {'Name': '/db', 'HostConfig': {'Privileged': True, 'NetworkMode': 'bridge'},
+              'NetworkSettings': {'Ports': {'5432/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '5432'}],
+                                            '8080/tcp': [{'HostIp': '100.64.0.1', 'HostPort': '8080'}],
+                                            '9000/tcp': None}},
+              'Mounts': [{'Source': '/var/run/docker.sock'}]}
+        nginx = {'Name': '/nginx', 'HostConfig': {'Privileged': False, 'NetworkMode': 'bridge'},
+                 'NetworkSettings': {'Ports': {'80/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '80'}],
+                                               '443/tcp': [{'HostIp': '::', 'HostPort': '443'}]}},
+                 'Mounts': []}
+        host = StubHost({'docker': 'abc123 def456', 'docker_inspect': json.dumps([db, nginx])})
         results = {f['id']: f for f in guard.check_docker(host)}
-        self.assertEqual(results['docker_publish']['evidence'], {'db': ['0.0.0.0:5432->5432/tcp']})
+        self.assertEqual(results['docker_publish']['status'], 'fail')
+        self.assertEqual(results['docker_publish']['evidence']['published'],
+                         {'db': ['*:5432->5432/tcp'],
+                          'nginx': ['*:80->80/tcp', '*:443->443/tcp']})
+        self.assertEqual(results['docker_publish']['evidence']['risky'], {'db': ['*:5432->5432/tcp']})
         self.assertEqual(results['docker_isolation']['evidence'], {'db': ['privileged', 'docker socket mounted']})
+
+        proxy_only = StubHost({'docker': 'nginx1', 'docker_inspect': json.dumps([nginx])})
+        proxy = {f['id']: f for f in guard.check_docker(proxy_only)}
+        self.assertEqual(proxy['docker_publish']['status'], 'pass')
+        self.assertEqual(proxy['docker_publish']['evidence']['risky'], {})
+        self.assertEqual(proxy['docker_publish']['evidence']['unexpected'], {})
 
     def test_ssh(self):
         self.assertEqual(guard.ssh_values('permitrootlogin no\npasswordauthentication yes'),

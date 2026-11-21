@@ -7,15 +7,13 @@ Small, dependency-free, **local** security posture audit and explicitly gated re
 ## Quick start
 
 ```bash
-git clone https://github.com/YOUR-ACCOUNT/vps-guard.git
+git clone https://github.com/jordonmckoy/vps-guard.git
 cd vps-guard
 python3 guard.py init  # interactive provider selection
 python3 guard.py scan
 sudo python3 guard.py scan
 python3 guard.py plan
 ```
-
-The GitHub URL above is a **placeholder** until you publish this repo. Alternatively extract the ZIP artifact directly on the VPS. Run `python3 -m unittest discover -s tests -v` before first use.
 
 Reports are written to `./reports/audit-YYYYMMDDTHHMMSSZ.json` and `.md` with restrictive local permissions. `reports/` is gitignored. **Do not post raw reports publicly:** they contain hostnames, ports, running services and package information. Output is not sent anywhere.
 
@@ -45,7 +43,7 @@ The selection is saved to `.vps-guard.json` (gitignored). CLI overrides: `python
 - APT upgrade candidates (simulation; lists may be stale) and pending reboots
 - unattended-upgrades package, periodic configuration and service/timer state
 - Accounts: extra UID 0 accounts, empty passwords, passwordless sudo, `docker` group members
-- Docker: wildcard/public published ports, privileged containers, host networking, mounted Docker socket
+- Docker: public published ports (80/443 expected for reverse proxies; database/API-style ports fail), privileged containers, host networking, mounted Docker socket
 - Tailscale: backend state, node key expiry, tags, start at boot, health warnings, client updates, advertised routes/exit node, Tailscale SSH, Funnel exposure
 - Clock synchronisation, AppArmor, kernel IP forwarding
 - Manual critical checks: provider-side firewall, backups, disaster recovery; Tailscale ACLs and tailnet settings
